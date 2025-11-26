@@ -1,42 +1,236 @@
-<!DOCTYPE html>
-<html>
-  <head> 
-  <meta charset="UTF-8">
-  <title>JoystiickWEB</title>
-    <style>
-body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, sans-serif;
-    display: flex;
-    justify-content: center;
-    transition: 0.25s;
-    background: #000;
-    color: white;
-}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Browser — GitHub Pages Template</title>
+  <style>
+    :root{--bg:#0f1720;--card:#0b1220;--muted:#93a6bf;--accent:#3b82f6}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter, system-ui, -apple-system, Roboto, Arial;background:linear-gradient(180deg,#071024 0%, #071827 100%);color:#e6eef8}
+    .topbar{display:flex;gap:8px;padding:10px;background:rgba(255,255,255,0.03);align-items:center}
+    .controls{display:flex;gap:6px;align-items:center}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:var(--muted);cursor:pointer}
+    button:hover{border-color:rgba(255,255,255,0.12);color:#fff}
+    .address{flex:1;display:flex;gap:8px;align-items:center}
+    input.url{flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.02);color:#e6eef8}
+    .tabs{display:flex;gap:6px;padding:8px;background:rgba(255,255,255,0.01);overflow:auto}
+    .tab{padding:8px 12px;border-radius:8px;background:transparent;border:1px solid transparent;color:var(--muted);cursor:pointer;white-space:nowrap}
+    .tab.active{background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.06);color:#fff}
+    .main{display:flex;flex-direction:column;height:calc(100vh - 120px)}
+    .iframe-wrap{flex:1;border-top:1px solid rgba(255,255,255,0.02);position:relative}
+    iframe.viewer{width:100%;height:100%;border:0;background:#fff}
+    .bookmark-list{display:flex;gap:8px;padding:8px;overflow:auto}
+    .bookmark{padding:6px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.03);cursor:pointer;color:var(--muted)}
+    .footer{padding:8px;font-size:12px;color:var(--muted);text-align:center}
+    .small{font-size:12px;color:var(--muted)}
+    /* responsive */
+    @media (max-width:700px){.topbar{flex-direction:column;align-items:stretch}.controls{width:100%;justify-content:space-between}.tabs{padding:6px}}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="controls">
+      <button id="back" title="Back">◀</button>
+      <button id="forward" title="Forward">▶</button>
+      <button id="reload" title="Reload">⟳</button>
+      <button id="home" title="Home">🏠</button>
+    </div>
+
+    <div class="address">
+      <input id="url" class="url" placeholder="type a URL (https://example.com) or search terms" spellcheck="false" />
+      <button id="go">Go</button>
+      <button id="newtab" title="New tab">＋ Tab</button>
+    </div>
+
+    <div style="margin-left:8px;display:flex;align-items:center;gap:8px">
+      <button id="bookmark" title="Bookmark current">★</button>
+      <button id="open-external" title="Open in new window">↗</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs" aria-label="Tabs"></div>
+
+  <div class="main">
+    <div class="bookmark-list" id="bookmarks"></div>
+    <div class="iframe-wrap">
+      <iframe id="viewer" class="viewer" sandbox="allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"></iframe>
+    </div>
+    <div class="footer small">Note: many sites block embedding in iframes (X-Frame-Options). Use the ↗ button to open blocked sites in a new tab.</div>
+  </div>
+
+  <script>
+    // Simple browser-like template that works as static files for GitHub Pages.
+    // Features: tabs, bookmarks, per-tab history, localStorage persistence, keyboard shortcuts.
+
+    const DEFAULT_HOME = 'https://example.com/'
+    const tabsEl = document.getElementById('tabs')
+    const viewer = document.getElementById('viewer')
+    const urlInput = document.getElementById('url')
+    const goBtn = document.getElementById('go')
+    const backBtn = document.getElementById('back')
+    const forwardBtn = document.getElementById('forward')
+    const reloadBtn = document.getElementById('reload')
+    const homeBtn = document.getElementById('home')
+    const newTabBtn = document.getElementById('newtab')
+    const bookmarkBtn = document.getElementById('bookmark')
+    const bookmarksEl = document.getElementById('bookmarks')
+    const openExternalBtn = document.getElementById('open-external')
+
+    // State
+    let state = {
+      tabs: [],
+      active: 0,
+      bookmarks: []
+    }
+
+    // Load from localStorage
+    try {
+      const raw = localStorage.getItem('mini-browser-state')
+      if(raw) state = JSON.parse(raw)
+    } catch(e){ console.warn('Could not load state', e) }
+
+    function saveState(){
+      try{ localStorage.setItem('mini-browser-state', JSON.stringify(state)) }catch(e){console.warn('save failed',e)}
+    }
+
+    // Ensure at least one tab
+    if(!state.tabs || state.tabs.length === 0){
+      state.tabs = [{id: Date.now(), history:[DEFAULT_HOME], index:0}]
+      state.active = 0
+    }
+
+    function renderTabs(){
+      tabsEl.innerHTML = ''
+      state.tabs.forEach((t, i) =>{
+        const btn = document.createElement('button')
+        btn.className = 'tab' + (i === state.active ? ' active' : '')
+        btn.textContent = (new URL(t.history[t.index]).hostname || t.history[t.index]) || 'New Tab'
+        btn.title = t.history[t.index]
+        btn.onclick = ()=>{ state.active = i; render(); }
+        btn.oncontextmenu = (ev)=>{ ev.preventDefault(); closeTab(i) }
+        tabsEl.appendChild(btn)
+      })
+    }
+
+    function renderBookmarks(){
+      bookmarksEl.innerHTML = ''
+      state.bookmarks.forEach((b, i)=>{
+        const el = document.createElement('div')
+        el.className = 'bookmark'
+        el.textContent = b.title || b.url
+        el.title = b.url
+        el.onclick = ()=>{ navigateTo(b.url) }
+        el.oncontextmenu = (ev)=>{ ev.preventDefault(); state.bookmarks.splice(i,1); saveState(); renderBookmarks() }
+        bookmarksEl.appendChild(el)
+      })
+    }
+
+    function currentTab(){ return state.tabs[state.active] }
+
+    function navigateTo(raw){
+      if(!raw) return
+      // If input looks like search terms (no dot or space), use search
+      let url = raw.trim()
+      const looksLikeUrl = url.includes('.') || url.startsWith('http')
+      if(!url.startsWith('http://') && !url.startsWith('https://')){
+        if(looksLikeUrl) url = 'https://' + url
+        else url = 'https://www.google.com/search?q=' + encodeURIComponent(url)
       }
-#frame {
-    width: 90%;
-    max-width: 600px;
-    margin-top: 40px;
-    padding: 20px;
-    border-radius: 10px;
-    transition: 0.25s;
-}
-      #messages {
-    height: 400px;
-    overflow-y: auto;
-    padding: 10px;
-    border-radius: 10px;
-    margin-bottom: 10px;
-    transition: 0.25s;
-}
-.msg { margin-bottom: 15px; }
-.user { font-weight: bold; }
-.feedback { font-weight: bold; }
-input { padding: 10px; border-radius: 6px; border: none; transition: 0.25s; flex:1; min-width:80px; }
-button { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; transition: 0.25s; }
-     
-    </style>
-  </head>
+      const tab = currentTab()
+      // Trim history forward if navigating after back
+      tab.history = tab.history.slice(0, tab.index+1)
+      tab.history.push(url)
+      tab.index = tab.history.length-1
+      loadCurrent()
+      saveState()
+    }
+
+    function loadCurrent(){
+      const tab = currentTab()
+      const url = tab.history[tab.index]
+      urlInput.value = url
+      // Many sites block framing; we attempt to load and show message on error
+      viewer.src = url
+      updateNavButtons()
+      renderTabs()
+    }
+
+    function updateNavButtons(){
+      const tab = currentTab()
+      backBtn.disabled = tab.index <= 0
+      forwardBtn.disabled = tab.index >= tab.history.length-1
+    }
+
+    function goBack(){ const tab = currentTab(); if(tab.index>0){ tab.index--; loadCurrent(); saveState() } }
+    function goForward(){ const tab = currentTab(); if(tab.index < tab.history.length-1){ tab.index++; loadCurrent(); saveState() } }
+    function reload(){ viewer.src = viewer.src }
+    function goHome(){ navigateTo(DEFAULT_HOME) }
+
+    function newTab(url){
+      const t = {id: Date.now()+Math.random(), history:[url||DEFAULT_HOME], index:0}
+      state.tabs.push(t)
+      state.active = state.tabs.length-1
+      render(); saveState()
+    }
+
+    function closeTab(i){
+      if(state.tabs.length === 1) { // reset
+        state.tabs = [{id: Date.now(), history:[DEFAULT_HOME], index:0}]
+        state.active = 0
+      } else {
+        state.tabs.splice(i,1)
+        if(state.active >= state.tabs.length) state.active = state.tabs.length-1
+      }
+      render(); saveState()
+    }
+
+    function bookmarkCurrent(){
+      const url = urlInput.value
+      state.bookmarks.unshift({url, title: url})
+      // keep 30 max
+      state.bookmarks = state.bookmarks.slice(0,30)
+      saveState(); renderBookmarks()
+    }
+
+    function openExternal(){ window.open(urlInput.value || currentTab().history[currentTab().index], '_blank') }
+
+    // UI wiring
+    goBtn.onclick = ()=> navigateTo(urlInput.value)
+    urlInput.onkeydown = (e)=>{ if(e.key === 'Enter'){ navigateTo(urlInput.value) } }
+    backBtn.onclick = goBack
+    forwardBtn.onclick = goForward
+    reloadBtn.onclick = reload
+    homeBtn.onclick = goHome
+    newTabBtn.onclick = ()=> newTab()
+    bookmarkBtn.onclick = ()=> bookmarkCurrent()
+    openExternalBtn.onclick = openExternal
+
+    // iframe error handling: detect when a site blocks framing
+    viewer.addEventListener('load', ()=>{
+      // We try to read contentWindow location; if cross-origin or blocked, we cannot access — that's expected.
+      // If iframe ended up blank, show a small inline fallback page that explains blocking.
+      try{
+        const doc = viewer.contentDocument || viewer.contentWindow.document
+        if(!doc || doc.body.innerHTML.trim() === ''){
+          // Might be blocked; don't override cross-origin content though
+          // Fallback UI handled by footer note; nothing further here.
+        }
+      }catch(e){
+        // cross-origin access error; silent
+      }
+    })
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e)=>{
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l'){ e.preventDefault(); urlInput.select(); urlInput.focus() }
+      else if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't'){ e.preventDefault(); newTab() }
+      else if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w'){ e.preventDefault(); closeTab(state.active) }
+    })
+
+    // Initial render
+    function render(){ renderTabs(); renderBookmarks(); loadCurrent(); }
+    render()
+  </script>
+</body>
 </html>
